@@ -34,7 +34,7 @@ end
 local function run(fn, opts)
 	opts = opts or {}
 	return function(cmd_opts)
-		-- Ensure stdpath("data")/site/csa/{history,agents,cache} (+ agent md files).
+		-- Ensure stdpath("data")/site/csa/{history,agents,skills,cache} (+ agent md files).
 		pcall(function()
 			require("csa.storage").ensure()
 		end)

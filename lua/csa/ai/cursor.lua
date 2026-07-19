@@ -178,6 +178,16 @@ local function build_prompt(prompt, files, mode, prior)
 		parts[#parts + 1] = ""
 	end
 
+	-- Skills mentioned as /name in the user request (opt-in only).
+	local skill_names = storage.skill_mentions_in_text(prompt)
+	local skills_ctx = storage.skills_context_prompt(skill_names)
+	if type(skills_ctx) == "string" and skills_ctx ~= "" then
+		parts[#parts + 1] = skills_ctx
+		parts[#parts + 1] = ""
+		parts[#parts + 1] = "---"
+		parts[#parts + 1] = ""
+	end
+
 	parts[#parts + 1] = "Format your reply in Markdown (headings, lists, code fences when useful)."
 	local lang = config.language()
 	local label = config.language_label()

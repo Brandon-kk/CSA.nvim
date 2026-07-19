@@ -144,6 +144,7 @@ Pack.register({
 | ---- | ---- |
 | `<CR>` | 发送 |
 | `<S-CR>`（插入） | 换行 |
+| `/` | 补全已安装 skill 名（blink.cmp）；`/name` 仅注入该 skill |
 | `f` | 文件选择器（`fd`） |
 | `h` | 历史会话 |
 | `A` | 选择模型 |
@@ -303,6 +304,7 @@ require("csa").setup({
 | `cache/selected_model.json` | 当前模型 |
 | `cache/last_session.json` | 上次会话 id（重开恢复） |
 | `agents/*.md` | 人格 / 上下文文档（非空时注入 prompt） |
+| `skills/` | 已安装 skill（`name/SKILL.md` 或 `name.md`）；在 Input 用 `/name` 引用时**仅注入提到的** skill（输入 `/` 可 blink.cmp 补全） |
 
 ---
 

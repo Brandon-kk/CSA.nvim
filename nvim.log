@@ -1,0 +1,2 @@
+WRN 2026-07-19T22:02:14.385 ?.8424     server_start:197: Failed to start server: operation not permitted: /var/folders/82/zwyh73m91sv7j59plf71plz80000gn/T/nvim.brain/vgAM2v/nvim.8424.0
+WRN 2026-07-19T22:02:42.247 ?.8498     server_start:197: Failed to start server: operation not permitted: /var/folders/82/zwyh73m91sv7j59plf71plz80000gn/T/nvim.brain/BeKu6M/nvim.8498.0

@@ -144,6 +144,7 @@ While streaming, most panel shortcuts are locked; `<C-c>` remains available.
 | --- | -------- |
 | `<CR>` | Submit prompt |
 | `<S-CR>` (insert) | Newline |
+| `/` | Complete installed skill names (blink.cmp); `/name` injects that skill only |
 | `f` | File picker (`fd`) |
 | `h` | History picker |
 | `A` | Model picker |
@@ -303,6 +304,7 @@ Root: `stdpath("data")/site/csa/`
 | `cache/selected_model.json` | Selected model |
 | `cache/last_session.json` | Last session id for reopen |
 | `agents/*.md` | Persona / context docs (injected when non-empty) |
+| `skills/` | Installed skills (`name/SKILL.md` or `name.md`); mention with `/name` in Input to inject **only those** skills into the turn (type `/` for blink.cmp completion) |
 
 ---
 
