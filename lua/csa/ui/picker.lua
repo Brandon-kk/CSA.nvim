@@ -609,9 +609,12 @@ local function open_float(kind, buf, geo, width, col, enter)
 		noautocmd = true,
 	})
 	vim.w[win].csa_panel = kind
-	-- Output nowrap: required for aligned pipe_table rendering. Wide tables are
-	-- reflowed to panel width by csa.ui.tables before markdown refresh.
-	vim.wo[win].wrap = kind == "input"
+	-- Output/Input wrap long prose. Wide pipe tables are still reflowed to the
+	-- panel width by csa.ui.tables so they stay readable with wrap on.
+	local wrap = kind == "output" or kind == "input"
+	vim.wo[win].wrap = wrap
+	vim.wo[win].linebreak = wrap
+	vim.wo[win].breakindent = kind == "output"
 	vim.wo[win].cursorline = false
 	vim.wo[win].number = false
 	vim.wo[win].relativenumber = false
