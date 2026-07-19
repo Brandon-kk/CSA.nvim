@@ -1,0 +1,4 @@
+.testdata/
+*.swp
+*.swo
+.DS_Store

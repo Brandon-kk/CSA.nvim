@@ -1,0 +1,331 @@
+*csa.txt*       CSA.nvim — Cursor Side Agent for Neovim
+
+==============================================================================
+CONTENTS                                                         *csa-contents*
+
+    1. Intro .............................. |csa-intro|
+    2. Requirements ....................... |csa-requirements|
+    3. Install & setup .................... |csa-setup|
+    4. Commands ........................... |csa-commands|
+    5. UI panels .......................... |csa-ui|
+    6. Keymaps ........................... |csa-keymaps|
+    7. Modes & models ..................... |csa-modes|
+    8. Files & review ..................... |csa-files|
+    9. History & restore .................. |csa-history|
+   10. Regenerate / edit .................. |csa-regen|
+   11. Context usage ...................... |csa-usage|
+   12. Configuration ...................... |csa-config|
+   13. Data directory ..................... |csa-data|
+   14. Lua API ............................ |csa-api|
+   15. FAQ ................................ |csa-faq|
+
+==============================================================================
+1. Intro                                                             *csa-intro*
+
+CSA.nvim (Cursor Side Agent) brings the Cursor agent into Neovim as a
+native right-hand panel. It drives the Cursor CLI so you can ask, plan,
+and edit without leaving the editor. Agent writes appear as reviewable
+diffs you accept or reject — the Cursor agent loop, adapted to a
+keyboard-first workflow.
+
+See also README.md / README.zh-CN.md in the repository.
+
+==============================================================================
+2. Requirements                                               *csa-requirements*
+
+- Neovim 0.10 or newer
+- Cursor CLI on |$PATH| (`cursor-agent` preferred; falls back to `agent`)
+- `fd` for the in-panel file picker
+- Optional: render-markdown.nvim for Output beautification
+
+Authenticate with `CURSOR_API_KEY` or `cursor-agent login`.
+
+==============================================================================
+3. Install & setup                                                   *csa-setup*
+
+Repository: https://github.com/Brandon-kk/CSA.nvim
+
+Automic / Pack: >
+    Pack.register({
+      "https://github.com/Brandon-kk/CSA.nvim",
+      module = "csa",
+    }):load({
+      cmd = { "CSAToggle", "CSAsk", "CSAgents" },
+      config = function(plugin)
+        plugin.setup({
+          ui = { width = 0.40 },
+          provider = {
+            command = "cursor-agent",
+            force = true,
+            auth = { env = "CURSOR_API_KEY" },
+          },
+        })
+      end,
+    })
+<
+lazy.nvim: >
+    {
+      "Brandon-kk/CSA.nvim",
+      cmd = { "CSAToggle", "CSAsk", "CSAgents" },
+      opts = {
+        ui = { width = 0.40 },
+        provider = {
+          command = "cursor-agent",
+          force = true,
+          auth = { env = "CURSOR_API_KEY" },
+        },
+      },
+    }
+<
+Open this file with |:help| `csa`.
+
+==============================================================================
+4. Commands                                                       *csa-commands*
+
+                                                                *:CSAToggle*
+:CSAToggle              Toggle the CSA side panel. Default runtime mode is
+                        `agent` (switchable with `[` / `]` in Input).
+
+                                                                    *:CSAsk*
+:CSAsk                  Open CSA in `ask` mode with mode locked. Accepts a
+                        line |:range| or visual selection as Input prefill.
+
+                                                                 *:CSAgents*
+:CSAgents               Open CSA in `agent` mode with mode locked. Accepts a
+                        line |:range| or visual selection as Input prefill.
+
+==============================================================================
+5. UI panels                                                              *csa-ui*
+
+Layout (right column):
+
+    Output     Chat transcript (read-only, markdown-friendly)
+    Files      Attached paths; shows diff stats after agent edits
+    Input      Prompt entry; title shows mode and context usage
+
+Floats live inside a pad split so borders stay in-column. Foreign overlays
+(LazyGit / full-screen floats) temporarily hide CSA.
+
+==============================================================================
+6. Keymaps                                                         *csa-keymaps*
+
+                                                        *csa-keymaps-common*
+All CSA panels~
+    Tab / S-Tab     Cycle Output → Files → Input (and back).
+                    Focusing Output places the cursor on a user message.
+    CTRL-W {chord}  Leave CSA to the main editor (common chords rebound).
+    CTRL-C          Cancel in-flight AI stream (while streaming).
+
+                                                         *csa-keymaps-input*
+Input~
+    <CR>            Submit prompt
+    <S-CR>          Newline (insert mode)
+    f               File picker (`fd`)
+    h               History picker
+    A               Model picker
+    [ / ]           Cycle AI mode: plan ↔ agent ↔ ask
+                    (disabled under :CSAsk / :CSAgents)
+    R               Regenerate last turn
+    CTRL-U / CTRL-D Scroll Output without leaving Input
+
+                                                        *csa-keymaps-output*
+Output~
+    [ / ]           Previous / next user message (wraps)
+    y               Copy message body under cursor (`"` and `+`)
+    r               Regenerate current user turn (see |csa-regen|)
+    e               Edit current user message and resend
+    Esc             Focus Input
+
+                                                         *csa-keymaps-files*
+Files~
+    d               Remove file under cursor
+    e               Open file in the main editor
+    Esc             Focus Input
+
+                                                        *csa-keymaps-review*
+Buffers with pending agent edits~
+    ca              Accept edit for this buffer (or all if none on buffer)
+    cr              Reject and restore previous content (or all)
+
+                                                       *csa-keymaps-pickers*
+File / history / model pickers~
+    Esc / q         Cancel
+    <CR>            Files: toggle select · History: open · Model: choose
+    <C-CR>          Files: confirm selection
+    R               Models: refresh list from CLI
+    d               History: delete session
+
+While streaming, most panel shortcuts are locked; CTRL-C remains available.
+
+==============================================================================
+7. Modes & models                                                    *csa-modes*
+
+Runtime modes (Input border / title accent):
+
+    plan     Read-only planning (`--mode plan`)
+    agent    Default write-capable agent (no `--mode`; uses `--force` if set)
+    ask      Q&A (`--mode ask`)
+
+Selected model is stored in cache and passed as `--model` (omit when `auto`).
+
+==============================================================================
+8. Files & review                                                    *csa-files*
+
+Attach paths with `f` (requires `fd`). When the allow-list is non-empty,
+out-of-scope agent writes are rejected and reverted.
+
+Agent edits:
+- Snapshotted before tool write
+- Shown as gutter signs + deleted virt lines (no Diff background wash)
+- Files panel shows fg-only stats like `󰐕3 󰍴1`
+- Accept / reject with |csa-keymaps-review|
+
+Edits are also stored on the assistant history message for rewind on
+regenerate / edit-resend.
+
+==============================================================================
+9. History & restore                                               *csa-history*
+
+Sessions persist under |csa-data| as JSON. Opening History (`h`) previews
+sessions in Output; Enter continues that session. Cancel restores the
+previous Output and session id.
+
+Reopening `:CSAToggle` restores the last non-empty session
+(`cache/last_session.json`). Use: >
+    require("csa").open({ fresh = true })
+<
+for a blank chat.
+
+==============================================================================
+10. Regenerate / edit                                               *csa-regen*
+
+Target turn = user message under the Output cursor (or the active `[`/`]`
+selection; Input `R` uses the last turn).
+
+Regenerate (`r`)~
+    1. Keep that user message
+    2. Delete all later messages
+    3. Revert file edits from the deleted range
+    4. Clear Cursor `--resume` id and re-ask (seeds local history)
+
+Edit & resend (`e`)~
+    1. Load user text into Input
+    2. Delete that user message and everything after
+    3. Revert file edits from the deleted range
+    4. Next `<CR>` sends with history seed
+
+==============================================================================
+11. Context usage                                                    *csa-usage*
+
+When the CLI reports token usage (`result.usage` / `type: "usage"`), the
+Input title shows context fill, e.g. `12k/200k · 6%`.
+
+Context used ≈ input + cache tokens. Window size defaults to 200k; model
+ids with `context=1m` (or similar) use 1M.
+
+==============================================================================
+12. Configuration                                                   *csa-config*
+
+Full option tree (defaults): >
+
+    {
+      language = "en",
+      ui = {
+        width = 0.30,
+        border = "rounded",
+        input = { height = 3, icon = "󰏫" },
+        files = { enabled = false, max_visible = 5, icon = "󰈙" },
+        output = { icon = "󰚩" },
+      },
+      identity = {
+        name = nil,   -- git user.name / $USER
+        icon = "",
+      },
+      provider = {
+        enabled = true,
+        command = "cursor-agent",
+        workspace = nil,
+        auth = { env = "CURSOR_API_KEY", key = nil },
+        force = false,
+        stream = true,
+        trust = true,
+      },
+    }
+<
+`language`: reply language injected into the provider prompt.
+Supported codes (18): en, zh-CN, zh-TW, ja, ko, fr, de, es, pt, ru,
+it, nl, pl, tr, ar, hi, vi, th. Unknown values fall back to `en`.
+
+`ui.width`: fraction of columns when in (0,1], absolute columns when >1.
+
+`provider.force`: pass `--force` in agent mode (needed for many write paths).
+
+`provider.auth.env`: environment *variable name*, not the secret itself.
+`provider.auth.key`: optional inline key (prefer env).
+
+==============================================================================
+13. Data directory                                                    *csa-data*
+
+Root: `stdpath("data")/site/csa/`
+
+    history/<id>.json       Session messages + cursor_chat_id + edits
+    cache/models.json       Model list cache
+    cache/selected_model.json
+    cache/last_session.json Last session id for reopen
+    agents/*.md             Persona docs injected when non-empty
+
+==============================================================================
+14. Lua API                                                             *csa-api*
+
+                                                          *csa.setup()*
+csa.setup({opts})         Apply configuration and init highlights.
+
+                                                          *csa.config()*
+csa.config()              Return resolved options table.
+
+                                                          *csa.toggle()*
+csa.toggle()              Toggle panel (agent mode).
+
+                                                            *csa.open()*
+csa.open({opts})          Open panel.
+                          opts.mode: "ask"|"agent"|"plan"
+                          opts.mode_locked: boolean
+                          opts.fresh: boolean — skip last-session restore
+
+                                                           *csa.close()*
+csa.close()               Close panel (saves last session if non-empty).
+
+                                                             *csa.ask()*
+csa.ask([{prefill}])      Open locked ask mode; optional Input prefill.
+
+                                                          *csa.agents()*
+csa.agents([{prefill}])   Open locked agent mode; optional Input prefill.
+
+                                               *csa.set_files_visible()*
+csa.set_files_visible([{visible}])
+                          Show/hide Files (`nil` toggles).
+
+                                                       *csa.get_files()*
+csa.get_files()           Return attached absolute paths.
+
+Lower-level modules (advanced): `csa.ui.picker`, `csa.storage`,
+`csa.review`, `csa.ai.cursor`.
+
+==============================================================================
+15. FAQ                                                                 *csa-faq*
+
+Q: Agent does not write files~
+A: Set `provider.force = true` and use agent mode (not ask/plan).
+
+Q: File picker errors~
+A: Install `fd` on PATH.
+
+Q: Reopen starts empty~
+A: Only sessions with at least one message are restored. Send once, or
+   pick a session with `h`.
+
+Q: Context usage missing from title~
+A: The CLI omitted usage for that turn; display updates when reported.
+
+==============================================================================
+vim:tw=78:ts=8:noet:ft=help:norl:
