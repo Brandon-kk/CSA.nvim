@@ -1177,7 +1177,40 @@ end
 
 local md_refresh_pending = false
 
---- True when Output view is already pinned near the last line.
+--- Screen-line height of the whole Output buffer in its window.
+---@param win integer
+---@param buf integer
+---@return integer
+local function output_text_height(win, buf)
+	local last = vim.api.nvim_buf_line_count(buf)
+	if last < 1 then
+		return 0
+	end
+	local ok, res = pcall(vim.api.nvim_win_text_height, win, {
+		start_row = 0,
+		end_row = last - 1,
+	})
+	if ok and type(res) == "table" and type(res.all) == "number" then
+		return res.all
+	end
+	return last
+end
+
+--- True when Output cannot scroll up (first screen line of buffer).
+local function output_at_top()
+	local owin = state.wins.output
+	local obuf = state.bufs.output
+	if not (win_valid(owin) and buf_valid(obuf)) then
+		return true
+	end
+	local ok, at_top = pcall(vim.api.nvim_win_call, owin, function()
+		local view = vim.fn.winsaveview()
+		return (view.topline or 1) <= 1 and (view.skipcol or 0) == 0 and (view.topfill or 0) == 0
+	end)
+	return ok and at_top
+end
+
+--- True when content cannot scroll down (fits in window, or last line flush to bottom).
 local function output_at_bottom()
 	local owin = state.wins.output
 	local obuf = state.bufs.output
@@ -1185,13 +1218,43 @@ local function output_at_bottom()
 		return true
 	end
 	local ok, at_bottom = pcall(vim.api.nvim_win_call, owin, function()
-		local height = vim.api.nvim_win_get_height(0)
+		local height = vim.api.nvim_win_get_height(owin)
 		local last = vim.api.nvim_buf_line_count(obuf)
-		local view = vim.fn.winsaveview()
-		local max_top = math.max(1, last - height + 1)
-		return (view.topline or 1) >= (max_top - 1)
+		if last < 1 then
+			return true
+		end
+		-- Short transcript: nothing to scroll.
+		if output_text_height(owin, obuf) <= height then
+			return true
+		end
+		if vim.fn.line("w$") < last then
+			return false
+		end
+		local line = vim.api.nvim_buf_get_lines(obuf, last - 1, last, false)[1] or ""
+		local col = math.max(1, #line)
+		local sp = vim.fn.screenpos(owin, last, col)
+		local info = vim.fn.getwininfo(owin)[1]
+		if type(sp) ~= "table" or (sp.row or 0) == 0 or not info then
+			return (info and (info.botline or 0) >= last) or false
+		end
+		local win_bottom = (info.winrow or 1) + (info.height or 1) - 1
+		return sp.row >= win_bottom
 	end)
 	return ok and at_bottom
+end
+
+--- Snap so the last line sits on the bottom row (undo Ctrl-E overscroll into `~`).
+local function clamp_output_bottom()
+	local owin = state.wins.output
+	local obuf = state.bufs.output
+	if not (win_valid(owin) and buf_valid(obuf)) then
+		return
+	end
+	local last = vim.api.nvim_buf_line_count(obuf)
+	pcall(vim.api.nvim_win_call, owin, function()
+		pcall(vim.api.nvim_win_set_cursor, owin, { last, 0 })
+		vim.cmd({ cmd = "normal", args = { "zb" }, bang = true, mods = { keepjumps = true } })
+	end)
 end
 
 local function sync_follow_output()
@@ -2083,28 +2146,155 @@ function M.session_id()
 end
 
 --- Scroll Output from Input (or any CSA panel) without leaving focus.
---- Uses screen-line Ctrl-E/Y so 'smoothscroll' works with wrap.
+--- Animated screen-line scroll (Snacks.animate when available); clamps at content edges.
 ---@param dir "up"|"down"
-function M.scroll_output(dir)
+---@param opts? { step?: integer }
+function M.scroll_output(dir, opts)
+	opts = opts or {}
 	local owin = state.wins.output
 	local obuf = state.bufs.output
 	if not (win_valid(owin) and buf_valid(obuf)) then
 		return
 	end
+	if dir == "down" and output_at_bottom() then
+		return
+	end
+	if dir == "up" and output_at_top() then
+		return
+	end
+
 	local height = vim.api.nvim_win_get_height(owin)
-	local step = math.max(1, math.floor(height / 2))
+	local step = opts.step
+	if type(step) ~= "number" or step < 1 then
+		step = math.max(1, math.floor(height / 2))
+	end
 	local ctrl = vim.api.nvim_replace_termcodes(dir == "up" and "<C-y>" or "<C-e>", true, false, true)
-	pcall(vim.api.nvim_win_call, owin, function()
-		-- Execute immediately inside the Output win (feedkeys would run after leave).
-		vim.cmd({
-			cmd = "normal",
-			args = { tostring(step) .. ctrl },
-			bang = true,
-			mods = { keepjumps = true },
+
+	---@return boolean moved
+	local function tick_once()
+		if dir == "down" and output_at_bottom() then
+			return false
+		end
+		if dir == "up" and output_at_top() then
+			return false
+		end
+		local moved = false
+		pcall(vim.api.nvim_win_call, owin, function()
+			local before = vim.fn.winsaveview()
+			vim.cmd({
+				cmd = "normal",
+				args = { ctrl },
+				bang = true,
+				mods = { keepjumps = true },
+			})
+			local after = vim.fn.winsaveview()
+			if
+				before.topline == after.topline
+				and (before.skipcol or 0) == (after.skipcol or 0)
+				and (before.topfill or 0) == (after.topfill or 0)
+			then
+				return
+			end
+			if dir == "down" and after.topline > before.topline then
+				local last = vim.api.nvim_buf_line_count(obuf)
+				if vim.fn.line("w$") >= last then
+					local info = vim.fn.getwininfo(owin)[1]
+					local line = vim.api.nvim_buf_get_lines(obuf, last - 1, last, false)[1] or ""
+					local sp = vim.fn.screenpos(owin, last, math.max(1, #line))
+					if info and type(sp) == "table" and (sp.row or 0) > 0 then
+						local win_bottom = (info.winrow or 1) + (info.height or 1) - 1
+						if sp.row < win_bottom then
+							vim.fn.winrestview(before)
+							clamp_output_bottom()
+							return
+						end
+					end
+				end
+			end
+			moved = true
+		end)
+		return moved
+	end
+
+	local function finish()
+		sync_follow_output()
+	end
+
+	-- Prefer Snacks.animate so CSA matches the user's smooth-scroll feel.
+	local animate = rawget(_G, "Snacks") and Snacks.animate
+	if type(animate) ~= "function" then
+		local ok, mod = pcall(require, "snacks.animate")
+		if ok then
+			animate = mod
+		end
+	end
+
+	if type(animate) == "function" or (type(animate) == "table" and animate.add) then
+		local run = type(animate) == "function" and animate or animate.add
+		local done_n = 0
+		run(0, step, function(value, ctx)
+			if not win_valid(owin) then
+				if ctx and ctx.anim then
+					ctx.anim:stop()
+				end
+				return
+			end
+			local target = math.floor(value)
+			while done_n < target do
+				if not tick_once() then
+					if ctx and ctx.anim then
+						ctx.anim:stop()
+					end
+					finish()
+					return
+				end
+				done_n = done_n + 1
+			end
+			if ctx and ctx.done then
+				finish()
+			end
+		end, {
+			int = true,
+			id = "csa_output_scroll",
+			buf = obuf,
+			duration = { step = 10, total = 200 },
+			easing = "linear",
 		})
+		return
+	end
+
+	-- Fallback without Snacks: still step with a short timer for mild smoothness.
+	local n = 0
+	local timer = vim.uv.new_timer()
+	if not timer then
+		for _ = 1, step do
+			if not tick_once() then
+				break
+			end
+		end
+		finish()
+		return
+	end
+	timer:start(0, 12, function()
+		vim.schedule(function()
+			if not win_valid(owin) or n >= step or not tick_once() then
+				pcall(function()
+					timer:stop()
+					timer:close()
+				end)
+				finish()
+				return
+			end
+			n = n + 1
+			if n >= step then
+				pcall(function()
+					timer:stop()
+					timer:close()
+				end)
+				finish()
+			end
+		end)
 	end)
-	-- Scrolling away from the bottom pauses stream stickiness; back to bottom resumes.
-	sync_follow_output()
 end
 
 local function bind_input_output_scroll(buf)
@@ -2445,6 +2635,25 @@ bind_maps = function()
 
 	local output = state.bufs.output
 	if buf_valid(output) then
+		bind_input_output_scroll(output)
+		vim.keymap.set({ "n", "v" }, "<ScrollWheelDown>", function()
+			M.scroll_output("down", { step = 3 })
+		end, {
+			buffer = output,
+			silent = true,
+			nowait = true,
+			noremap = true,
+			desc = "CSA smooth scroll down",
+		})
+		vim.keymap.set({ "n", "v" }, "<ScrollWheelUp>", function()
+			M.scroll_output("up", { step = 3 })
+		end, {
+			buffer = output,
+			silent = true,
+			nowait = true,
+			noremap = true,
+			desc = "CSA smooth scroll up",
+		})
 		-- Output: normal + visual only — block entering insert/replace/etc.
 		local block_insert = {
 			"i",
@@ -2902,9 +3111,46 @@ function M.open(opts)
 				return
 			end
 			local id = tostring(state.wins.output)
-			if scrolled[id] then
-				sync_follow_output()
+			if not scrolled[id] then
+				return
 			end
+			sync_follow_output()
+			-- Mouse wheel Ctrl-E can leave `~` under the last line; snap back.
+			if output_at_bottom() or output_at_top() then
+				return
+			end
+			local owin = state.wins.output
+			local obuf = state.bufs.output
+			if not buf_valid(obuf) then
+				return
+			end
+			local height = vim.api.nvim_win_get_height(owin)
+			if output_text_height(owin, obuf) <= height then
+				clamp_output_bottom()
+				sync_follow_output()
+				return
+			end
+			pcall(vim.api.nvim_win_call, owin, function()
+				local last = vim.api.nvim_buf_line_count(obuf)
+				if vim.fn.line("w$") < last then
+					return
+				end
+				local view = vim.fn.winsaveview()
+				if (view.skipcol or 0) ~= 0 then
+					return
+				end
+				local info = vim.fn.getwininfo(owin)[1]
+				local line = vim.api.nvim_buf_get_lines(obuf, last - 1, last, false)[1] or ""
+				local sp = vim.fn.screenpos(owin, last, math.max(1, #line))
+				if not info or type(sp) ~= "table" or (sp.row or 0) == 0 then
+					return
+				end
+				local win_bottom = (info.winrow or 1) + (info.height or 1) - 1
+				if sp.row < win_bottom then
+					clamp_output_bottom()
+					sync_follow_output()
+				end
+			end)
 		end,
 	})
 	-- Keep active message index in sync when moving inside Output (j/k, mouse).
