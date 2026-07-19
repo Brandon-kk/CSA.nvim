@@ -87,9 +87,11 @@ Open this file with |:help| `csa`.
                         `agent` (switchable with `[` / `]` in Input).
 
                                                                     *:CSAsk*
-:CSAsk                  Open CSA in `ask` mode with mode locked. Accepts a
+:CSAsk [text]           Open CSA in `ask` mode with mode locked. Accepts a
                         line |:range| or visual selection as Input prefill.
-
+                        With {text}, open the panel and submit immediately: >
+                            :CSAsk explain this function
+<
                                                                  *:CSAgents*
 :CSAgents               Open CSA in `agent` mode with mode locked. Accepts a
                         line |:range| or visual selection as Input prefill.
@@ -296,10 +298,15 @@ csa.open({opts})          Open panel.
 csa.close()               Close panel (saves last session if non-empty).
 
                                                              *csa.ask()*
-csa.ask([{prefill}])      Open locked ask mode; optional Input prefill.
+csa.ask([{prefill}], [{opts}])
+                          Open locked ask mode; optional Input prefill.
+                          opts.submit: boolean — send immediately
+                          (used by `:CSAsk {text}`).
 
                                                           *csa.agents()*
-csa.agents([{prefill}])   Open locked agent mode; optional Input prefill.
+csa.agents([{prefill}], [{opts}])
+                          Open locked agent mode; optional Input prefill.
+                          opts.submit: boolean — send immediately.
 
                                                *csa.set_files_visible()*
 csa.set_files_visible([{visible}])

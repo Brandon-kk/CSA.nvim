@@ -58,7 +58,9 @@ end
 
 ---@param mode "ask"|"agent"
 ---@param prefill? string
-local function open_locked(mode, prefill)
+---@param opts? { submit?: boolean }
+local function open_locked(mode, prefill, opts)
+	opts = opts or {}
 	ensure_init()
 	picker.open({ mode = mode, mode_locked = true })
 	if type(prefill) == "string" and vim.trim(prefill) ~= "" then
@@ -70,19 +72,29 @@ local function open_locked(mode, prefill)
 			picker.refresh_model_tag()
 		end
 	end
+	if opts.submit then
+		picker.focus("input", { insert = false })
+		vim.schedule(function()
+			picker.submit_input()
+		end)
+		return
+	end
 	picker.focus("input", { insert = true })
 end
 
---- Open CSA in ask mode (mode locked). Optional prefill (visual / range) goes into Input.
+--- Open CSA in ask mode (mode locked). Optional prefill (visual / range / args).
+--- When `opts.submit` is true, send immediately (used by `:CSAsk {text}`).
 ---@param prefill? string
-function M.ask(prefill)
-	open_locked("ask", prefill)
+---@param opts? { submit?: boolean }
+function M.ask(prefill, opts)
+	open_locked("ask", prefill, opts)
 end
 
 --- Open CSA in agent mode (mode locked). Optional prefill (visual / range) goes into Input.
 ---@param prefill? string
-function M.agents(prefill)
-	open_locked("agent", prefill)
+---@param opts? { submit?: boolean }
+function M.agents(prefill, opts)
+	open_locked("agent", prefill, opts)
 end
 
 return M

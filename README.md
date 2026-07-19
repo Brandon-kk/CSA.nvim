@@ -107,8 +107,8 @@ Pack.register({
 | Command | Behavior |
 | ------- | -------- |
 | `:CSAToggle` | Toggle the side panel. Default mode is `agent` (`[` / `]` to cycle). |
-| `:CSAsk` | Open locked `ask` mode. Accepts visual selection or `:[range]` as Input prefill. |
-| `:CSAgents` | Open locked `agent` mode. Same prefill rules as `:CSAsk`. |
+| `:CSAsk` | Open locked `ask` mode. Visual / `:[range]` prefills Input. `:CSAsk {text}` opens and **submits** immediately. |
+| `:CSAgents` | Open locked `agent` mode. Visual / `:[range]` prefills Input. |
 
 ---
 
@@ -315,7 +315,7 @@ Root: `stdpath("data")/site/csa/`
 | `csa.toggle()` | Toggle panel (agent mode, unlocked). |
 | `csa.open({opts})` | Open panel. `opts.mode`: `"ask"` \| `"agent"` \| `"plan"`; `opts.mode_locked`; `opts.fresh` skips last-session restore. |
 | `csa.close()` | Close panel (saves last session if non-empty). |
-| `csa.ask([{prefill}])` | Open locked ask mode; optional Input prefill. |
+| `csa.ask([{prefill}], [{opts}])` | Open locked ask mode; optional Input prefill. `opts.submit` sends immediately. |
 | `csa.agents([{prefill}])` | Open locked agent mode; optional Input prefill. |
 | `csa.set_files_visible([{visible}])` | Show / hide Files (`nil` toggles). |
 | `csa.get_files()` | Return attached absolute paths. |

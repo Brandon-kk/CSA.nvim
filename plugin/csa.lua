@@ -31,12 +31,21 @@ local function visual_text()
 	return nil
 end
 
-local function run(fn)
+local function run(fn, opts)
+	opts = opts or {}
 	return function(cmd_opts)
 		-- Ensure stdpath("data")/site/csa/{history,agents,cache} (+ agent md files).
 		pcall(function()
 			require("csa.storage").ensure()
 		end)
+
+		local arg_text = nil
+		if type(cmd_opts) == "table" and type(cmd_opts.args) == "string" then
+			local trimmed = vim.trim(cmd_opts.args)
+			if trimmed ~= "" then
+				arg_text = trimmed
+			end
+		end
 
 		local prefill = visual_text()
 		if not prefill and cmd_opts and (cmd_opts.range or 0) > 0 then
@@ -44,6 +53,17 @@ local function run(fn)
 			if #lines > 0 then
 				prefill = table.concat(lines, "\n")
 			end
+		end
+
+		-- Command-line text wins and (for CSAsk) is submitted immediately.
+		local submit = false
+		if arg_text then
+			prefill = arg_text
+			submit = opts.submit_args == true
+		end
+
+		local function invoke()
+			require("csa")[fn](prefill, { submit = submit })
 		end
 
 		local mode = vim.fn.mode(1)
@@ -56,12 +76,10 @@ local function run(fn)
 		if mode:sub(1, 1) == "t" then
 			local esc = vim.api.nvim_replace_termcodes("<C-\\><C-n>", true, false, true)
 			vim.api.nvim_feedkeys(esc, "n", false)
-			vim.schedule(function()
-				require("csa")[fn](prefill)
-			end)
+			vim.schedule(invoke)
 			return
 		end
-		require("csa")[fn](prefill)
+		invoke()
 	end
 end
 
@@ -69,9 +87,10 @@ vim.api.nvim_create_user_command("CSAToggle", run("toggle"), {
 	desc = "Toggle CSA side picker",
 })
 
-vim.api.nvim_create_user_command("CSAsk", run("ask"), {
-	desc = "Open CSA ask (Cursor CLI)",
+vim.api.nvim_create_user_command("CSAsk", run("ask", { submit_args = true }), {
+	desc = "Open CSA ask (optional text submits immediately)",
 	range = true,
+	nargs = "*",
 })
 
 vim.api.nvim_create_user_command("CSAgents", run("agents"), {

@@ -107,8 +107,8 @@ Pack.register({
 | 命令 | 行为 |
 | ---- | ---- |
 | `:CSAToggle` | 打开/关闭侧栏。默认 `agent` 模式（可用 `[` / `]` 切换）。 |
-| `:CSAsk` | 打开并锁定 `ask` 模式。支持 visual 或 `:[range]` 预填 Input。 |
-| `:CSAgents` | 打开并锁定 `agent` 模式。预填规则同 `:CSAsk`。 |
+| `:CSAsk` | 打开并锁定 `ask` 模式。visual / `:[range]` 预填 Input。`:CSAsk {文本}` 打开后**立即发送**。 |
+| `:CSAgents` | 打开并锁定 `agent` 模式。visual / `:[range]` 预填 Input。 |
 
 ---
 
@@ -315,7 +315,7 @@ require("csa").setup({
 | `csa.toggle()` | 切换面板（agent 模式，未锁定）。 |
 | `csa.open({opts})` | 打开面板。`opts.mode`：`"ask"` \| `"agent"` \| `"plan"`；`opts.mode_locked`；`opts.fresh` 跳过上次会话恢复。 |
 | `csa.close()` | 关闭面板（有内容时写入上次会话）。 |
-| `csa.ask([{prefill}])` | 打开锁定 ask 模式；可选预填 Input。 |
+| `csa.ask([{prefill}], [{opts}])` | 打开锁定 ask 模式；可选预填 Input。`opts.submit` 为立即发送。 |
 | `csa.agents([{prefill}])` | 打开锁定 agent 模式；可选预填 Input。 |
 | `csa.set_files_visible([{visible}])` | 显示 / 隐藏 Files（`nil` 切换）。 |
 | `csa.get_files()` | 返回已附加绝对路径。 |
