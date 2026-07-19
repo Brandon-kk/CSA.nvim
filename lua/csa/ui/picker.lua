@@ -167,9 +167,12 @@ local function ensure_buf(kind, name, lines)
 			pcall(vim.api.nvim_buf_set_name, buf, "csa://output.md")
 			vim.bo[buf].filetype = "markdown"
 			vim.b[buf].csa_panel = "output"
+			-- snacks.scroll keys off topline; useless/broken with wrap + virt lines.
+			vim.b[buf].snacks_scroll = false
 		else
 			pcall(vim.api.nvim_buf_set_name, buf, "csa://" .. name)
 			vim.bo[buf].filetype = "csa-" .. kind
+			vim.b[buf].snacks_scroll = false
 		end
 		-- Set lines before locking output/files as non-modifiable.
 		vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
@@ -615,6 +618,8 @@ local function open_float(kind, buf, geo, width, col, enter)
 	vim.wo[win].wrap = wrap
 	vim.wo[win].linebreak = wrap
 	vim.wo[win].breakindent = kind == "output"
+	-- With wrap, snacks.scroll (topline-based) barely fires; use Neovim sms instead.
+	vim.wo[win].smoothscroll = kind == "output"
 	vim.wo[win].cursorline = false
 	vim.wo[win].number = false
 	vim.wo[win].relativenumber = false
@@ -2078,6 +2083,7 @@ function M.session_id()
 end
 
 --- Scroll Output from Input (or any CSA panel) without leaving focus.
+--- Uses screen-line Ctrl-E/Y so 'smoothscroll' works with wrap.
 ---@param dir "up"|"down"
 function M.scroll_output(dir)
 	local owin = state.wins.output
@@ -2087,19 +2093,15 @@ function M.scroll_output(dir)
 	end
 	local height = vim.api.nvim_win_get_height(owin)
 	local step = math.max(1, math.floor(height / 2))
-	local delta = dir == "up" and -step or step
-	local last = vim.api.nvim_buf_line_count(obuf)
-	local max_top = math.max(1, last - height + 1)
+	local ctrl = vim.api.nvim_replace_termcodes(dir == "up" and "<C-y>" or "<C-e>", true, false, true)
 	pcall(vim.api.nvim_win_call, owin, function()
-		local view = vim.fn.winsaveview()
-		local topline = math.max(1, math.min(max_top, (view.topline or 1) + delta))
-		view.topline = topline
-		-- Cursor must stay inside the visible window. Leaving lnum on the last
-		-- stream line makes Neovim pull the viewport back down on winrestview.
-		view.lnum = math.max(topline, math.min(last, topline + math.floor(height / 2)))
-		view.col = 0
-		view.curswant = 0
-		vim.fn.winrestview(view)
+		-- Execute immediately inside the Output win (feedkeys would run after leave).
+		vim.cmd({
+			cmd = "normal",
+			args = { tostring(step) .. ctrl },
+			bang = true,
+			mods = { keepjumps = true },
+		})
 	end)
 	-- Scrolling away from the bottom pauses stream stickiness; back to bottom resumes.
 	sync_follow_output()
