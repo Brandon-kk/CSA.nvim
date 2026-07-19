@@ -1160,13 +1160,13 @@ end
 
 local output_ns = vim.api.nvim_create_namespace("csa_output")
 
---- Start an assistant block: icon + model on line 1, body streamed on line 2+.
+--- Start an assistant block: icon + model, blank line, then body streamed below.
 ---@return string header
 function M.begin_ai_response()
 	local model = (type(state.model) == "string" and state.model ~= "" and state.model) or "auto"
 	local header = string.format("%s %s", config.icon("output"), model)
-	-- Keep a body line under the header so status/stream never overwrite it.
-	M.append_output_block({ header, "" }, header, "assistant")
+	-- Header, blank separator, then an empty body line for status/stream.
+	M.append_output_block({ header, "", "" }, header, "assistant")
 	return header
 end
 
@@ -1462,6 +1462,10 @@ local function message_body_lines(idx)
 	local lines = vim.api.nvim_buf_get_lines(obuf, span.start_row, span.end_row, false)
 	if #lines > 0 then
 		table.remove(lines, 1) -- header
+	end
+	-- Drop the blank line between header and body.
+	if #lines > 0 and lines[1] == "" then
+		table.remove(lines, 1)
 	end
 	while #lines > 0 and lines[#lines] == "" do
 		table.remove(lines)
@@ -1808,7 +1812,7 @@ function M.submit_input()
 
 	local sender = config.user_name()
 	local header = string.format("%s %s", config.user_icon(), sender)
-	local block = { header }
+	local block = { header, "" }
 	for _, line in ipairs(lines) do
 		block[#block + 1] = line
 	end
@@ -1956,7 +1960,8 @@ function M.restore_output(snap)
 					body = vim.split(msg.content or "", "\n", { plain = true })
 				end
 				local start_row = row
-				row = row + 1 + #body + 1
+				-- header + blank + body + trailing blank
+				row = row + 1 + 1 + #body + 1
 				spans[#spans + 1] = {
 					role = msg.role == "assistant" and "assistant" or "user",
 					start_row = start_row,
@@ -2005,6 +2010,7 @@ function M.show_history(session)
 		local start_row = #block
 		headers[#headers + 1] = { row = start_row, header = header }
 		block[#block + 1] = header
+		block[#block + 1] = ""
 		for _, line in ipairs(body) do
 			block[#block + 1] = line
 		end
