@@ -173,10 +173,10 @@ While streaming, most panel shortcuts are locked; `<C-c>` remains available.
 
 | Key | Behavior |
 | --- | -------- |
-| `ca` | Accept edit for this buffer (or all if none on buffer) |
-| `cr` | Reject and restore previous content (or all) |
-| `gaa` | Accept **all** pending agent edits (global) |
-| `gra` | Reject **all** pending agent edits (global) |
+| `n` / `p` | Next / previous edit hunk (pending-review buffer only) |
+| `c` / `r` | On a hunk: accept / reject that hunk; elsewhere normal Vim `c` / `r` |
+| `caa` | Accept edit (this buffer; anywhere = all pending) |
+| `cra` | Reject and restore (this buffer; anywhere = all pending) |
 
 ### File / history / model pickers
 
@@ -209,9 +209,9 @@ Attach paths with `f`. When the allow-list is non-empty, out-of-scope agent writ
 | Step | Behavior |
 | ---- | -------- |
 | Snapshot | Content captured before tool write |
-| Decorate | Gutter signs + deleted virt lines (no Diff background wash) |
-| Files panel | Fg-only add/delete stats |
-| Accept / reject | `ca` / `cr` on the edited buffer; `gaa` / `gra` for all |
+| Decorate | `−` removed (virt above), `+` new lines, `←` old text on 1:1 changes; gutter signs only |
+| Files panel | Fg-only add/delete stats; `e` jumps to the first hunk |
+| Accept / reject | `c` / `r` on a hunk; `n` / `p` between hunks; `caa` / `cra` for whole file or all pending |
 
 Edits are stored on the assistant history message for rewind on regenerate / edit-resend.
 

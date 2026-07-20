@@ -145,11 +145,13 @@ Files~
     Esc             Focus Input
 
                                                         *csa-keymaps-review*
-Buffers with pending agent edits~
-    ca              Accept edit for this buffer (or all if none on buffer)
-    cr              Reject and restore previous content (or all)
-    gaa             Accept all pending agent edits (global)
-    gra             Reject all pending agent edits (global)
+Buffers with pending agent edits (buffer-local) and globally~
+    n               Next agent edit hunk (buffer-local)
+    p               Previous agent edit hunk (buffer-local)
+    c               Accept hunk at cursor (else Vim change operator)
+    r               Reject hunk at cursor (else Vim replace character)
+    caa             Accept edit for this buffer, or all pending edits elsewhere
+    cra             Reject and restore this buffer, or all pending edits elsewhere
 
                                                        *csa-keymaps-pickers*
 File / history / model pickers~
@@ -180,9 +182,10 @@ out-of-scope agent writes are rejected and reverted.
 
 Agent edits:
 - Snapshotted before tool write
-- Shown as gutter signs + deleted virt lines (no Diff background wash)
-- Files panel shows fg-only stats like `󰐕3 󰍴1`
-- Accept / reject with |csa-keymaps-review|
+- Inline review: `−` removed lines (virt above) and `+` new lines with optional `←` old text on 1:1 changes
+- Gutter signs only (no Diff background wash)
+- Files panel shows fg-only stats like `󰐕3 󰍴1`; `e` opens the file and jumps to the first hunk
+- Per-hunk and whole-file accept / reject: |csa-keymaps-review|
 
 Edits are also stored on the assistant history message for rewind on
 regenerate / edit-resend.

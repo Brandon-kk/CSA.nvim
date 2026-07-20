@@ -990,7 +990,7 @@ local function render_files()
 				for _, c in ipairs(chunks) do
 					stats_w = stats_w + vim.fn.strdisplaywidth(c[1])
 				end
-				stats_w = stats_w + 1 -- gap before right-aligned stats
+				stats_w = stats_w + 1 + right_pad -- gap before stats + right inset
 			end
 			local name_max = win_w - left_pad - icon_w - 1 - right_pad - stats_w
 			local name = truncate_width(display_name(path), math.max(1, name_max))
@@ -1012,8 +1012,13 @@ local function render_files()
 			hl_mode = "combine",
 		})
 		if m.stats then
+			local stats = m.stats
+			if right_pad > 0 then
+				stats = vim.deepcopy(m.stats)
+				stats[#stats + 1] = { string.rep(" ", right_pad), "Normal" }
+			end
 			vim.api.nvim_buf_set_extmark(buf, files_ns, i - 1, 0, {
-				virt_text = m.stats,
+				virt_text = stats,
 				virt_text_pos = "right_align",
 				-- replace: avoid combining Diff* backgrounds from theme links
 				hl_mode = "replace",
@@ -1704,7 +1709,7 @@ local function run_ai_request(prompt, opts)
 			local pending_n = review.count()
 			if pending_n > 0 then
 				M.append_stream_text(
-					string.format("\n_Pending file edits: %d — `ca`/`gaa` accept · `cr`/`gra` reject_", pending_n)
+					string.format("\n_Pending file edits: %d — `caa` accept · `cra` reject_", pending_n)
 				)
 			end
 			M.finish_ai_response()
@@ -2935,7 +2940,10 @@ function M.open_file_at_cursor()
 		return
 	end
 	pcall(vim.api.nvim_set_current_win, edit_win)
-	vim.cmd.edit(vim.fn.fnameescape(path))
+	local review = require("csa.review")
+	if not review.open_in_editor(path, { jump = true }) then
+		vim.cmd.edit(vim.fn.fnameescape(path))
+	end
 end
 
 function M.remove_file_at_cursor()

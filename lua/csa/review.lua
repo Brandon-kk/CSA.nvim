@@ -186,6 +186,71 @@ function M.rewind_files(messages)
 	return n
 end
 
+---@param text string
+---@return string[]
+local function split_lines(text)
+	local lines = vim.split(text or "", "\n", { plain = true })
+	if #lines > 0 and lines[#lines] == "" then
+		table.remove(lines)
+	end
+	return lines
+end
+
+---@param lines string[]
+---@return string
+local function join_lines(lines)
+	if #lines == 0 then
+		return ""
+	end
+	return table.concat(lines, "\n")
+end
+
+---@param lines string[]
+---@param start integer 1-based
+---@param count integer
+---@return string[]
+local function slice_lines(lines, start, count)
+	local out = {}
+	for i = 0, count - 1 do
+		out[#out + 1] = lines[start + i] or ""
+	end
+	return out
+end
+
+---@param lines string[]
+---@param start integer 1-based
+---@param count integer
+---@param replacement string[]
+---@return string[]
+local function splice_lines(lines, start, count, replacement)
+	local out = {}
+	for i = 1, start - 1 do
+		out[#out + 1] = lines[i]
+	end
+	for _, line in ipairs(replacement) do
+		out[#out + 1] = line
+	end
+	local tail = start + count
+	for i = tail, #lines do
+		out[#out + 1] = lines[i]
+	end
+	return out
+end
+
+---@param before string
+---@param after string
+---@return table[]|nil
+local function diff_hunks(before, after)
+	local ok, hunks = pcall(vim.diff, before or "", after or "", {
+		result_type = "indices",
+		algorithm = "histogram",
+	})
+	if not ok or type(hunks) ~= "table" then
+		return nil
+	end
+	return hunks
+end
+
 --- Apply inline diff decorations for before/after in an open buffer.
 ---@param buf integer
 ---@param before string
@@ -195,70 +260,92 @@ local function decorate_buf(buf, before, after)
 	vim.api.nvim_buf_clear_namespace(buf, diff_ns, 0, -1)
 	pcall(vim.fn.sign_unplace, sign_group, { buffer = buf })
 
-	local ok, hunks = pcall(vim.diff, before or "", after or "", {
-		result_type = "indices",
-		algorithm = "histogram",
-	})
-	if not ok or type(hunks) ~= "table" then
+	local hunks = diff_hunks(before, after)
+	if not hunks then
+		vim.b[buf].csa_review_hunks = nil
 		return
 	end
 
-	local before_lines = vim.split(before or "", "\n", { plain = true })
-	-- trailing empty from split
-	if #before_lines > 0 and before_lines[#before_lines] == "" then
-		table.remove(before_lines)
-	end
+	local before_lines = split_lines(before)
+	local after_lines = split_lines(after)
+	local after_line_count = #after_lines
+	---@type { index: integer, a_start: integer, a_count: integer, b_start: integer, b_count: integer, anchor: integer }[]
+	local review_hunks = {}
 
-	for _, h in ipairs(hunks) do
+	for hi, h in ipairs(hunks) do
 		local a_start, a_count, b_start, b_count = h[1], h[2], h[3], h[4]
-		-- Added / changed lines in the new file (1-based b_start).
+		local anchor = b_count > 0 and b_start or math.max(1, math.min(b_start, after_line_count + 1))
+		review_hunks[#review_hunks + 1] = {
+			index = hi,
+			a_start = a_start,
+			a_count = a_count,
+			b_start = b_start,
+			b_count = b_count,
+			anchor = anchor,
+		}
+
 		if b_count > 0 then
 			local sign = (a_count > 0) and "CSAReviewChange" or "CSAReviewAdd"
 			for row = b_start, b_start + b_count - 1 do
 				if row >= 1 then
-					-- Sign gutter only — no line background (lualine-style, not DiffAdd wash).
 					pcall(vim.fn.sign_place, 0, sign_group, sign, buf, { lnum = row, priority = 90 })
+					local new_line = after_lines[row] or ""
+					local virt = { { "+ ", "CSADiffAdd" } }
+					if a_count > 0 and b_count == a_count then
+						local off = row - b_start
+						local old_line = before_lines[a_start + off] or ""
+						if old_line ~= new_line then
+							virt[#virt + 1] = { "  ← " .. old_line, "CSADiffChange" }
+						end
+					end
+					pcall(vim.api.nvim_buf_set_extmark, buf, diff_ns, row - 1, 0, {
+						virt_text = virt,
+						virt_text_pos = "inline",
+						hl_mode = "combine",
+						meta = { csa_hunk = hi },
+					})
 				end
 			end
 		end
-		-- Removed lines: show as virtual lines above the next surviving line.
+
 		if a_count > 0 then
 			local virt = {}
 			for i = 0, a_count - 1 do
 				local line = before_lines[a_start + i] or ""
 				virt[#virt + 1] = { { "− " .. line, "CSADiffDelete" } }
 			end
-			local anchor = b_start -- 1-based; virt_lines_above on this row
-			if b_count == 0 then
-				-- Pure deletion: attach above the line that followed the deletion.
-				anchor = math.max(1, b_start)
-			end
-			local row0 = math.max(0, anchor - 1)
+			local anchor_row = anchor
+			local row0 = math.max(0, anchor_row - 1)
 			pcall(vim.api.nvim_buf_set_extmark, buf, diff_ns, row0, 0, {
 				virt_lines = virt,
 				virt_lines_above = true,
+				meta = { csa_hunk = hi },
 			})
 			if b_count == 0 then
 				pcall(vim.fn.sign_place, 0, sign_group, "CSAReviewDel", buf, {
-					lnum = math.max(1, anchor),
+					lnum = math.max(1, anchor_row),
 					priority = 90,
 				})
 			end
 		end
 	end
+
+	vim.b[buf].csa_review_hunks = review_hunks
 end
 
 ---@param path string
-local function reload_and_decorate(path)
+---@param opts? { focus?: boolean, jump?: boolean }
+local function reload_and_decorate(path, opts)
+	opts = opts or {}
 	path = abs_path(path)
 	local edit = path and pending[path]
 	if not edit then
-		return
+		return nil
 	end
 	-- Prefer already-open buffer; else edit in background then decorate.
 	local buf = vim.fn.bufnr(path, true)
 	if buf <= 0 then
-		return
+		return nil
 	end
 	if not vim.api.nvim_buf_is_loaded(buf) then
 		pcall(vim.fn.bufload, buf)
@@ -273,10 +360,7 @@ local function reload_and_decorate(path)
 	if type(disk) == "string" then
 		edit.after = disk
 	end
-	local lines = vim.split(edit.after or "", "\n", { plain = true })
-	if #lines > 0 and lines[#lines] == "" then
-		table.remove(lines)
-	end
+	local lines = split_lines(edit.after or "")
 	local modifiable = vim.bo[buf].modifiable
 	vim.bo[buf].modifiable = true
 	vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
@@ -284,22 +368,212 @@ local function reload_and_decorate(path)
 	vim.bo[buf].modified = false
 	decorate_buf(buf, edit.before or "", edit.after or "")
 	bind_buf_maps(buf)
-	-- Focus an editor window on this file when possible.
-	local picker = require("csa.ui.picker")
-	local st = picker.state()
-	local target = st.prev_win
-	if not (type(target) == "number" and vim.api.nvim_win_is_valid(target)) then
-		for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
-			local cfg = vim.api.nvim_win_get_config(win)
-			if cfg.relative == "" and not vim.w[win].csa_panel then
-				target = win
-				break
+	if opts.focus ~= false then
+		local picker = require("csa.ui.picker")
+		local st = picker.state()
+		local target = st.prev_win
+		if not (type(target) == "number" and vim.api.nvim_win_is_valid(target)) then
+			for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+				local cfg = vim.api.nvim_win_get_config(win)
+				if cfg.relative == "" and not vim.w[win].csa_panel then
+					target = win
+					break
+				end
+			end
+		end
+		if type(target) == "number" and vim.api.nvim_win_is_valid(target) then
+			pcall(vim.api.nvim_win_set_buf, target, buf)
+		end
+	end
+	if opts.jump then
+		vim.schedule(function()
+			if vim.api.nvim_buf_is_valid(buf) then
+				M.jump_first_hunk(buf)
+			end
+		end)
+	end
+	return buf
+end
+
+--- Open a pending-review file in the main editor (decorate + optional jump to first hunk).
+---@param path string
+---@param opts? { jump?: boolean }
+---@return boolean
+function M.open_in_editor(path, opts)
+	opts = opts or {}
+	if reload_and_decorate(path, { focus = true, jump = opts.jump }) then
+		return true
+	end
+	return false
+end
+
+---@param buf integer
+---@return integer|nil hunk index
+local function hunk_index_at_cursor(buf)
+	if not vim.api.nvim_buf_is_valid(buf) then
+		return nil
+	end
+	local row0 = vim.api.nvim_win_get_cursor(0)[1] - 1
+	local marks = vim.api.nvim_buf_get_extmarks(buf, diff_ns, { row0, 0 }, { row0, -1 }, {
+		details = true,
+		overlap = true,
+	})
+	for _, mark in ipairs(marks) do
+		local meta = mark[4] and mark[4].meta
+		if type(meta) == "table" and type(meta.csa_hunk) == "number" then
+			return meta.csa_hunk
+		end
+	end
+	-- Pure-deletion hunks: cursor may sit on the line below removed text.
+	if row0 > 0 then
+		marks = vim.api.nvim_buf_get_extmarks(buf, diff_ns, { row0 - 1, 0 }, { row0 - 1, -1 }, {
+			details = true,
+			overlap = true,
+		})
+		for _, mark in ipairs(marks) do
+			local meta = mark[4] and mark[4].meta
+			if type(meta) == "table" and type(meta.csa_hunk) == "number" then
+				return meta.csa_hunk
 			end
 		end
 	end
-	if type(target) == "number" and vim.api.nvim_win_is_valid(target) then
-		pcall(vim.api.nvim_win_set_buf, target, buf)
+	return nil
+end
+
+---@param buf integer
+---@return boolean
+local function on_hunk_line(buf)
+	return hunk_index_at_cursor(buf) ~= nil
+end
+
+---@param buf integer
+function M.jump_first_hunk(buf)
+	local hunks = vim.b[buf].csa_review_hunks
+	if type(hunks) ~= "table" or #hunks == 0 then
+		return
 	end
+	pcall(vim.api.nvim_win_set_cursor, 0, { hunks[1].anchor, 0 })
+	pcall(vim.cmd, "normal! zz")
+end
+
+---@param buf integer
+---@param step integer 1 = next, -1 = previous
+function M.jump_hunk(buf, step)
+	local hunks = vim.b[buf].csa_review_hunks
+	if type(hunks) ~= "table" or #hunks == 0 then
+		return
+	end
+	step = step < 0 and -1 or 1
+	local row = vim.api.nvim_win_get_cursor(0)[1]
+	local target = step > 0 and 1 or #hunks
+	if step > 0 then
+		for i, h in ipairs(hunks) do
+			if h.anchor > row then
+				target = i
+				break
+			end
+			target = i
+		end
+		if hunks[target].anchor <= row and target < #hunks then
+			target = target + 1
+		end
+	else
+		for i = #hunks, 1, -1 do
+			if hunks[i].anchor < row then
+				target = i
+				break
+			end
+		end
+		if hunks[target].anchor >= row and target > 1 then
+			target = target - 1
+		end
+	end
+	pcall(vim.api.nvim_win_set_cursor, 0, { hunks[target].anchor, 0 })
+	pcall(vim.cmd, "normal! zz")
+end
+
+local function refresh_files_panel()
+	pcall(function()
+		require("csa.ui.picker").refresh_files()
+	end)
+end
+
+---@param buf integer
+---@param idx integer|nil hunk index; nil = at cursor
+function M.accept_hunk(buf, idx)
+	local path = abs_path(vim.api.nvim_buf_get_name(buf))
+	local edit = path and pending[path]
+	local hunks = vim.b[buf].csa_review_hunks
+	idx = idx or hunk_index_at_cursor(buf)
+	if not edit or type(hunks) ~= "table" or type(idx) ~= "number" then
+		return false
+	end
+	local h = hunks[idx]
+	if not h then
+		return false
+	end
+	local before_lines = split_lines(edit.before)
+	local after_lines = split_lines(edit.after)
+	local new_before = splice_lines(
+		before_lines,
+		h.a_start,
+		h.a_count,
+		slice_lines(after_lines, h.b_start, h.b_count)
+	)
+	edit.before = join_lines(new_before)
+	edit.added, edit.removed = count_diff(edit.before, edit.after)
+	if edit.before == edit.after then
+		clear_buffer_diff(path)
+		pending[path] = nil
+		vim.notify("CSA: accepted " .. vim.fn.fnamemodify(path, ":."), vim.log.levels.INFO, { title = "CSA" })
+	else
+		decorate_buf(buf, edit.before, edit.after)
+		bind_buf_maps(buf)
+	end
+	refresh_files_panel()
+	return true
+end
+
+---@param buf integer
+---@param idx integer|nil
+function M.reject_hunk(buf, idx)
+	local path = abs_path(vim.api.nvim_buf_get_name(buf))
+	local edit = path and pending[path]
+	local hunks = vim.b[buf].csa_review_hunks
+	idx = idx or hunk_index_at_cursor(buf)
+	if not edit or type(hunks) ~= "table" or type(idx) ~= "number" then
+		return false
+	end
+	local h = hunks[idx]
+	if not h then
+		return false
+	end
+	local before_lines = split_lines(edit.before)
+	local after_lines = split_lines(edit.after)
+	local new_after = splice_lines(
+		after_lines,
+		h.b_start,
+		h.b_count,
+		slice_lines(before_lines, h.a_start, h.a_count)
+	)
+	edit.after = join_lines(new_after)
+	edit.added, edit.removed = count_diff(edit.before, edit.after)
+	write_file(path, edit.after)
+	local modifiable = vim.bo[buf].modifiable
+	vim.bo[buf].modifiable = true
+	vim.api.nvim_buf_set_lines(buf, 0, -1, false, new_after)
+	vim.bo[buf].modifiable = modifiable
+	vim.bo[buf].modified = false
+	if edit.before == edit.after then
+		clear_buffer_diff(path)
+		pending[path] = nil
+		vim.notify("CSA: rejected " .. vim.fn.fnamemodify(path, ":."), vim.log.levels.WARN, { title = "CSA" })
+	else
+		decorate_buf(buf, edit.before, edit.after)
+		bind_buf_maps(buf)
+	end
+	refresh_files_panel()
+	return true
 end
 
 ---@param buf integer
@@ -307,13 +581,37 @@ bind_buf_maps = function(buf)
 	if not vim.api.nvim_buf_is_valid(buf) then
 		return
 	end
-	-- Buffer-local so global `ca`/`cr` text-objects stay intact elsewhere.
-	vim.keymap.set("n", "ca", function()
+	local path = abs_path(vim.api.nvim_buf_get_name(buf))
+	if not path or not pending[path] then
+		return
+	end
+	vim.keymap.set("n", "caa", function()
 		M.accept(vim.api.nvim_buf_get_name(buf))
 	end, { buffer = buf, silent = true, nowait = true, desc = "CSA: accept agent edit" })
-	vim.keymap.set("n", "cr", function()
+	vim.keymap.set("n", "cra", function()
 		M.reject(vim.api.nvim_buf_get_name(buf))
 	end, { buffer = buf, silent = true, nowait = true, desc = "CSA: reject agent edit" })
+	vim.keymap.set("n", "n", function()
+		M.jump_hunk(buf, 1)
+	end, { buffer = buf, silent = true, desc = "CSA: next agent edit hunk" })
+	vim.keymap.set("n", "p", function()
+		M.jump_hunk(buf, -1)
+	end, { buffer = buf, silent = true, desc = "CSA: previous agent edit hunk" })
+	-- On a hunk: accept/reject that hunk; elsewhere defer to Vim `c` / `r`.
+	vim.keymap.set("n", "c", function()
+		if on_hunk_line(buf) then
+			M.accept_hunk(buf)
+			return ""
+		end
+		return "c"
+	end, { buffer = buf, expr = true, silent = true, desc = "CSA: accept hunk at cursor" })
+	vim.keymap.set("n", "r", function()
+		if on_hunk_line(buf) then
+			M.reject_hunk(buf)
+			return ""
+		end
+		return "r"
+	end, { buffer = buf, expr = true, silent = true, desc = "CSA: reject hunk at cursor" })
 end
 
 ---@param a integer
@@ -387,11 +685,8 @@ end
 
 local function count_diff(before, after)
 	local added, removed = 0, 0
-	local ok, hunks = pcall(vim.diff, before or "", after or "", {
-		result_type = "indices",
-		algorithm = "histogram",
-	})
-	if ok and type(hunks) == "table" then
+	local hunks = diff_hunks(before, after)
+	if hunks then
 		for _, h in ipairs(hunks) do
 			removed = removed + (h[2] or 0)
 			added = added + (h[4] or 0)
@@ -447,7 +742,7 @@ function M.record(opts)
 	local do_decorate = opts.decorate ~= false
 	vim.schedule(function()
 		if do_decorate then
-			reload_and_decorate(path)
+			reload_and_decorate(path, { focus = true })
 		end
 		if not do_attach then
 			return
@@ -577,16 +872,16 @@ end
 
 local keymaps_done = false
 
---- Global `gaa` / `gra` for accept-all / reject-all pending edits.
+--- Global `caa` / `cra` for accept-all / reject-all pending edits.
 function M.setup_keymaps()
 	if keymaps_done then
 		return
 	end
 	keymaps_done = true
-	vim.keymap.set("n", "gaa", function()
+	vim.keymap.set("n", "caa", function()
 		M.accept_all()
 	end, { silent = true, desc = "CSA: accept all agent edits" })
-	vim.keymap.set("n", "gra", function()
+	vim.keymap.set("n", "cra", function()
 		M.reject_all()
 	end, { silent = true, desc = "CSA: reject all agent edits" })
 end
