@@ -144,7 +144,6 @@ Pack.register({
 | ---- | ---- |
 | `<CR>` | 发送 |
 | `<S-CR>`（插入） | 换行 |
-| `/` | 补全已安装 skill 名（blink.cmp）；`/name` 仅注入该 skill |
 | `f` | 文件选择器（`fd`） |
 | `h` | 历史会话 |
 | `A` | 选择模型 |
@@ -176,6 +175,8 @@ Pack.register({
 | ---- | ---- |
 | `ca` | 接受当前 buffer 改动（无匹配时接受全部） |
 | `cr` | 拒绝并恢复（无匹配时拒绝全部） |
+| `gaa` | 接受**全部**待审阅改动（全局） |
+| `gra` | 拒绝**全部**待审阅改动（全局） |
 
 ### 文件选择器 / 历史 / 模型
 
@@ -210,7 +211,7 @@ Pack.register({
 | 快照 | 工具写入前保存内容 |
 | 装饰 | gutter sign + 删除行虚线（无 Diff 背景） |
 | Files 面板 | 仅前景色增删统计 |
-| 接受 / 拒绝 | 在被改 buffer 上 `ca` / `cr` |
+| 接受 / 拒绝 | 被改 buffer 上 `ca` / `cr`；全局 `gaa` / `gra` 全部接受 / 拒绝 |
 
 改动会记在 assistant 历史消息上，供重新生成 / 编辑重发时回退。
 
@@ -304,7 +305,6 @@ require("csa").setup({
 | `cache/selected_model.json` | 当前模型 |
 | `cache/last_session.json` | 上次会话 id（重开恢复） |
 | `agents/*.md` | 人格 / 上下文文档（非空时注入 prompt） |
-| `skills/` | 已安装 skill（`name/SKILL.md` 或 `name.md`）；在 Input 用 `/name` 引用时**仅注入提到的** skill（输入 `/` 可 blink.cmp 补全） |
 
 ---
 

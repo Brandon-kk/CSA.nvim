@@ -122,7 +122,6 @@ All CSA panels~
 Input~
     <CR>            Submit prompt
     <S-CR>          Newline (insert mode)
-    /               Complete skill names (blink.cmp); `/name` injects that skill
     f               File picker (`fd`)
     h               History picker
     A               Model picker
@@ -149,6 +148,8 @@ Files~
 Buffers with pending agent edits~
     ca              Accept edit for this buffer (or all if none on buffer)
     cr              Reject and restore previous content (or all)
+    gaa             Accept all pending agent edits (global)
+    gra             Reject all pending agent edits (global)
 
                                                        *csa-keymaps-pickers*
 File / history / model pickers~
@@ -276,15 +277,6 @@ Root: `stdpath("data")/site/csa/`
     cache/selected_model.json
     cache/last_session.json Last session id for reopen
     agents/*.md             Persona docs injected when non-empty
-    skills/                 User-installed skills (`/name` in Input)
-
-Skills layout under `skills/`~
-    my-skill/SKILL.md       Preferred (Cursor / agentskills.io)
-    other.md                Flat markdown also accepted
-
-In Input, type `/` to complete a skill name (blink.cmp). Only skills
-mentioned as `/name` are injected into that turn. See `skills/README.md`
-created by |csa| on first run.
 
 ==============================================================================
 14. Lua API                                                             *csa-api*

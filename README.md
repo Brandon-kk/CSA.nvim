@@ -144,7 +144,6 @@ While streaming, most panel shortcuts are locked; `<C-c>` remains available.
 | --- | -------- |
 | `<CR>` | Submit prompt |
 | `<S-CR>` (insert) | Newline |
-| `/` | Complete installed skill names (blink.cmp); `/name` injects that skill only |
 | `f` | File picker (`fd`) |
 | `h` | History picker |
 | `A` | Model picker |
@@ -176,6 +175,8 @@ While streaming, most panel shortcuts are locked; `<C-c>` remains available.
 | --- | -------- |
 | `ca` | Accept edit for this buffer (or all if none on buffer) |
 | `cr` | Reject and restore previous content (or all) |
+| `gaa` | Accept **all** pending agent edits (global) |
+| `gra` | Reject **all** pending agent edits (global) |
 
 ### File / history / model pickers
 
@@ -210,7 +211,7 @@ Attach paths with `f`. When the allow-list is non-empty, out-of-scope agent writ
 | Snapshot | Content captured before tool write |
 | Decorate | Gutter signs + deleted virt lines (no Diff background wash) |
 | Files panel | Fg-only add/delete stats |
-| Accept / reject | `ca` / `cr` on the edited buffer |
+| Accept / reject | `ca` / `cr` on the edited buffer; `gaa` / `gra` for all |
 
 Edits are stored on the assistant history message for rewind on regenerate / edit-resend.
 
@@ -304,7 +305,6 @@ Root: `stdpath("data")/site/csa/`
 | `cache/selected_model.json` | Selected model |
 | `cache/last_session.json` | Last session id for reopen |
 | `agents/*.md` | Persona / context docs (injected when non-empty) |
-| `skills/` | Installed skills (`name/SKILL.md` or `name.md`); mention with `/name` in Input to inject **only those** skills into the turn (type `/` for blink.cmp completion) |
 
 ---
 

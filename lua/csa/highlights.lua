@@ -167,16 +167,6 @@ local function sync_mode_accents()
 			fg = chip_bg,
 			bg = surface,
 		})
-		-- Skill mention pills in Input (`/name`) share the same chip look.
-		vim.api.nvim_set_hl(0, "CSASkillTag" .. suffix, {
-			fg = chip_fg,
-			bg = chip_bg,
-			bold = true,
-		})
-		vim.api.nvim_set_hl(0, "CSASkillTagEdge" .. suffix, {
-			fg = chip_bg,
-			bg = surface,
-		})
 	end
 end
 
@@ -210,20 +200,6 @@ end
 ---@return string
 function M.model_tag_edge_group(mode)
 	return "CSAModelTagEdge" .. mode_suffix(mode)
-end
-
---- Body highlight for `/skill` pills in Input.
----@param mode "ask"|"agent"|"plan"|string|nil
----@return string
-function M.skill_tag_group(mode)
-	return "CSASkillTag" .. mode_suffix(mode)
-end
-
---- Round-cap highlight for `/skill` pills.
----@param mode "ask"|"agent"|"plan"|string|nil
----@return string
-function M.skill_tag_edge_group(mode)
-	return "CSASkillTagEdge" .. mode_suffix(mode)
 end
 
 function M.setup()

@@ -466,6 +466,56 @@ function M.record(opts)
 	end)
 end
 
+--- Accept every pending agent edit (keep disk as-is, clear review UI).
+---@return boolean
+function M.accept_all()
+	local paths = vim.tbl_keys(pending)
+	local n = #paths
+	if n == 0 then
+		vim.notify("CSA: no pending file edits", vim.log.levels.INFO, { title = "CSA" })
+		return false
+	end
+	for _, p in ipairs(paths) do
+		clear_buffer_diff(p)
+	end
+	pending = {}
+	vim.notify("CSA: accepted " .. n .. " edit(s)", vim.log.levels.INFO, { title = "CSA" })
+	pcall(function()
+		require("csa.ui.picker").refresh_files()
+	end)
+	return true
+end
+
+--- Reject every pending agent edit (restore previous content).
+---@return boolean
+function M.reject_all()
+	---@type { path: string, before: string, kind?: string }[]
+	local items = {}
+	for p, edit in pairs(pending) do
+		items[#items + 1] = {
+			path = p,
+			before = edit.before or "",
+			kind = edit.kind,
+		}
+	end
+	if #items == 0 then
+		vim.notify("CSA: no pending file edits", vim.log.levels.INFO, { title = "CSA" })
+		return false
+	end
+	local n = 0
+	for _, item in ipairs(items) do
+		if restore_path(item.path, item.before, item.kind) then
+			n = n + 1
+		end
+	end
+	pending = {}
+	vim.notify("CSA: rejected " .. n .. " edit(s)", vim.log.levels.WARN, { title = "CSA" })
+	pcall(function()
+		require("csa.ui.picker").refresh_files()
+	end)
+	return true
+end
+
 ---@param path? string nil = current buffer / all if no match
 ---@return boolean
 function M.accept(path)
@@ -473,22 +523,7 @@ function M.accept(path)
 		local cur = vim.api.nvim_buf_get_name(0)
 		path = abs_path(cur)
 		if not path or not pending[path] then
-			-- accept all
-			local n = 0
-			for p in pairs(pending) do
-				clear_buffer_diff(p)
-				pending[p] = nil
-				n = n + 1
-			end
-			if n == 0 then
-				vim.notify("CSA: no pending file edits", vim.log.levels.INFO, { title = "CSA" })
-				return false
-			end
-			vim.notify("CSA: accepted " .. n .. " edit(s)", vim.log.levels.INFO, { title = "CSA" })
-			pcall(function()
-				require("csa.ui.picker").refresh_files()
-			end)
-			return true
+			return M.accept_all()
 		end
 	else
 		path = abs_path(path)
@@ -513,32 +548,7 @@ function M.reject(path)
 		local cur = vim.api.nvim_buf_get_name(0)
 		path = abs_path(cur)
 		if not path or not pending[path] then
-			local n = 0
-			for p, edit in pairs(pending) do
-				clear_buffer_diff(p)
-				write_file(p, edit.before or "")
-				local buf = vim.fn.bufnr(p)
-				if buf > 0 and vim.api.nvim_buf_is_loaded(buf) then
-					local lines = vim.split(edit.before or "", "\n", { plain = true })
-					if #lines > 0 and lines[#lines] == "" then
-						table.remove(lines)
-					end
-					vim.bo[buf].modifiable = true
-					vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-					vim.bo[buf].modified = false
-				end
-				pending[p] = nil
-				n = n + 1
-			end
-			if n == 0 then
-				vim.notify("CSA: no pending file edits", vim.log.levels.INFO, { title = "CSA" })
-				return false
-			end
-			vim.notify("CSA: rejected " .. n .. " edit(s)", vim.log.levels.WARN, { title = "CSA" })
-			pcall(function()
-				require("csa.ui.picker").refresh_files()
-			end)
-			return true
+			return M.reject_all()
 		end
 	else
 		path = abs_path(path)
@@ -548,19 +558,7 @@ function M.reject(path)
 		vim.notify("CSA: no pending edit for this file", vim.log.levels.INFO, { title = "CSA" })
 		return false
 	end
-	clear_buffer_diff(path)
-	write_file(path, edit.before or "")
-	local buf = vim.fn.bufnr(path)
-	if buf > 0 and vim.api.nvim_buf_is_loaded(buf) then
-		local lines = vim.split(edit.before or "", "\n", { plain = true })
-		if #lines > 0 and lines[#lines] == "" then
-			table.remove(lines)
-		end
-		vim.bo[buf].modifiable = true
-		vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-		vim.bo[buf].modified = false
-	end
-	pending[path] = nil
+	restore_path(path, edit.before or "", edit.kind)
 	vim.notify("CSA: rejected " .. vim.fn.fnamemodify(path, ":."), vim.log.levels.WARN, { title = "CSA" })
 	pcall(function()
 		require("csa.ui.picker").refresh_files()
@@ -575,6 +573,22 @@ function M.clear_all()
 	pending = {}
 	snapshots = {}
 	turn_edits = {}
+end
+
+local keymaps_done = false
+
+--- Global `gaa` / `gra` for accept-all / reject-all pending edits.
+function M.setup_keymaps()
+	if keymaps_done then
+		return
+	end
+	keymaps_done = true
+	vim.keymap.set("n", "gaa", function()
+		M.accept_all()
+	end, { silent = true, desc = "CSA: accept all agent edits" })
+	vim.keymap.set("n", "gra", function()
+		M.reject_all()
+	end, { silent = true, desc = "CSA: reject all agent edits" })
 end
 
 return M

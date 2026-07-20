@@ -61,7 +61,6 @@ local state = {
 local CSA_ZINDEX = 45
 
 local model_tag_ns = vim.api.nvim_create_namespace("csa_model_tag")
-local skill_tag_ns = vim.api.nvim_create_namespace("csa_skill_tag")
 -- Nerd Font round caps (U+E0B6 / U+E0B4). Plain ASCII space parks the cursor after the pill.
 local TAG_CAP_L = vim.fn.nr2char(0xe0b6)
 local TAG_CAP_R = vim.fn.nr2char(0xe0b4)
@@ -183,13 +182,8 @@ local function ensure_buf(kind, name, lines)
 				vim.bo[buf].readonly = true
 			end
 		end
-		-- Input: blink.cmp skills after `/`. Other panels stay quiet.
-		if kind == "input" then
-			vim.b[buf].completion = true
-			pcall(require("csa.blink").ensure)
-		else
-			vim.b[buf].completion = false
-		end
+		-- Avoid blink.cmp / path completion popups in CSA panels.
+		vim.b[buf].completion = false
 	elseif kind == "output" then
 		pcall(vim.api.nvim_buf_set_name, buf, "csa://output.md")
 		vim.bo[buf].filetype = "markdown"
@@ -437,63 +431,6 @@ function M.refresh_model_tag()
 		virt_text_pos = "inline",
 		right_gravity = false,
 	})
-	M.refresh_skill_tags()
-end
-
---- Rounded pills for installed `/skill` mentions in Input.
-function M.refresh_skill_tags()
-	local buf = state.bufs.input
-	if not buf_valid(buf) then
-		return
-	end
-	vim.api.nvim_buf_clear_namespace(buf, skill_tag_ns, 0, -1)
-	local ok, storage = pcall(require, "csa.storage")
-	if not ok then
-		return
-	end
-	local known = {}
-	for _, skill in ipairs(storage.list_skills()) do
-		known[skill.name] = true
-	end
-	if vim.tbl_isempty(known) then
-		return
-	end
-	local body = highlights.skill_tag_group(state.ai_mode)
-	local edge = highlights.skill_tag_edge_group(state.ai_mode)
-	local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
-	for row, line in ipairs(lines) do
-		local col = 1
-		while true do
-			local s, e, name = line:find("/([%w._%-]+)", col)
-			if not s then
-				break
-			end
-			if known[name] then
-				local start0 = s - 1
-				-- Left round cap (inline before the mention).
-				pcall(vim.api.nvim_buf_set_extmark, buf, skill_tag_ns, row - 1, start0, {
-					virt_text = { { TAG_CAP_L, edge } },
-					virt_text_pos = "inline",
-					right_gravity = false,
-					priority = 110,
-				})
-				-- Body background over `/name`.
-				pcall(vim.api.nvim_buf_set_extmark, buf, skill_tag_ns, row - 1, start0, {
-					end_col = e,
-					hl_group = body,
-					priority = 100,
-				})
-				-- Right round cap after the mention.
-				pcall(vim.api.nvim_buf_set_extmark, buf, skill_tag_ns, row - 1, e, {
-					virt_text = { { TAG_CAP_R, edge } },
-					virt_text_pos = "inline",
-					right_gravity = true,
-					priority = 110,
-				})
-			end
-			col = e + 1
-		end
-	end
 end
 
 --- Park cursor on the pad space — one character after the pill.
@@ -1767,7 +1704,7 @@ local function run_ai_request(prompt, opts)
 			local pending_n = review.count()
 			if pending_n > 0 then
 				M.append_stream_text(
-					string.format("\n_Pending file edits: %d — `ca` accept · `cr` reject_", pending_n)
+					string.format("\n_Pending file edits: %d — `ca`/`gaa` accept · `cr`/`gra` reject_", pending_n)
 				)
 			end
 			M.finish_ai_response()
@@ -2504,12 +2441,21 @@ bind_maps = function()
 			-- Override global FileType maps (e.g. treesitter select on <CR>/<BS>) —
 			-- those hang on CSA nofile buffers with no parser.
 			if kind == "input" then
-				vim.keymap.set({ "n", "i" }, "<CR>", "<Cmd>lua require('csa.ui.picker').submit_input()<CR>", {
+				vim.keymap.set({ "n", "i" }, "<CR>", function()
+					if vim.fn.mode():find("[iR]") then
+						local ok, cmp = pcall(require, "blink.cmp")
+						if ok and cmp.is_menu_visible and cmp.is_menu_visible() then
+							cmp.accept()
+							return
+						end
+					end
+					require("csa.ui.picker").submit_input()
+				end, {
 					buffer = buf,
 					silent = true,
 					nowait = true,
 					noremap = true,
-					desc = "CSA submit input",
+					desc = "CSA submit input (accept blink when open)",
 				})
 				-- Shift-Enter inserts a newline while typing.
 				vim.keymap.set("i", "<S-CR>", "<CR>", {
@@ -2547,20 +2493,65 @@ bind_maps = function()
 			for _, lhs in ipairs({ "<BS>", "<Del>", "A", "f", "h", "d", "e", "q" }) do
 				pcall(vim.keymap.del, "i", lhs, { buffer = buf })
 			end
-			vim.keymap.set({ "n", "i" }, "<Tab>", "<Cmd>lua require('csa.ui.picker').focus_next(1)<CR>", {
-				buffer = buf,
-				silent = true,
-				nowait = true,
-				noremap = true,
-				desc = "CSA next panel",
-			})
-			vim.keymap.set({ "n", "i" }, "<S-Tab>", "<Cmd>lua require('csa.ui.picker').focus_next(-1)<CR>", {
-				buffer = buf,
-				silent = true,
-				nowait = true,
-				noremap = true,
-				desc = "CSA previous panel",
-			})
+			if kind == "input" then
+				vim.keymap.set("i", "<Tab>", function()
+					local ok, cmp = pcall(require, "blink.cmp")
+					if ok and cmp.is_visible and cmp.is_visible() then
+						cmp.select_next()
+						return
+					end
+					require("csa.ui.picker").focus_next(1)
+				end, {
+					buffer = buf,
+					silent = true,
+					nowait = true,
+					noremap = true,
+					desc = "CSA next panel / blink select next",
+				})
+				vim.keymap.set("i", "<S-Tab>", function()
+					local ok, cmp = pcall(require, "blink.cmp")
+					if ok and cmp.is_visible and cmp.is_visible() then
+						cmp.select_prev()
+						return
+					end
+					require("csa.ui.picker").focus_next(-1)
+				end, {
+					buffer = buf,
+					silent = true,
+					nowait = true,
+					noremap = true,
+					desc = "CSA previous panel / blink select prev",
+				})
+				vim.keymap.set("n", "<Tab>", "<Cmd>lua require('csa.ui.picker').focus_next(1)<CR>", {
+					buffer = buf,
+					silent = true,
+					nowait = true,
+					noremap = true,
+					desc = "CSA next panel",
+				})
+				vim.keymap.set("n", "<S-Tab>", "<Cmd>lua require('csa.ui.picker').focus_next(-1)<CR>", {
+					buffer = buf,
+					silent = true,
+					nowait = true,
+					noremap = true,
+					desc = "CSA previous panel",
+				})
+			else
+				vim.keymap.set({ "n", "i" }, "<Tab>", "<Cmd>lua require('csa.ui.picker').focus_next(1)<CR>", {
+					buffer = buf,
+					silent = true,
+					nowait = true,
+					noremap = true,
+					desc = "CSA next panel",
+				})
+				vim.keymap.set({ "n", "i" }, "<S-Tab>", "<Cmd>lua require('csa.ui.picker').focus_next(-1)<CR>", {
+					buffer = buf,
+					silent = true,
+					nowait = true,
+					noremap = true,
+					desc = "CSA previous panel",
+				})
+			end
 			if kind == "input" or kind == "files" or kind == "output" then
 				bind_leave_to_main(buf)
 			end
@@ -3307,20 +3298,6 @@ function M.open(opts)
 			buffer = state.bufs.input,
 			callback = function()
 				vim.schedule(restore_cursor_after_tag_if_blank)
-			end,
-		})
-		vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI", "TextChangedP" }, {
-			group = state.augroup,
-			buffer = state.bufs.input,
-			callback = function()
-				M.refresh_skill_tags()
-			end,
-		})
-		vim.api.nvim_create_autocmd("InsertEnter", {
-			group = state.augroup,
-			buffer = state.bufs.input,
-			callback = function()
-				pcall(require("csa.blink").ensure)
 			end,
 		})
 	end

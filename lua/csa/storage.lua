@@ -12,7 +12,6 @@ local AGENT_FILES = {
 
 local ensured = false
 local AGENT_DOC_MAX_BYTES = 48 * 1024
-local SKILL_DOC_MAX_BYTES = 64 * 1024
 
 --- Chat ids from warmup before the first persisted message (no empty history files).
 ---@type table<string, string>
@@ -31,10 +30,6 @@ function M.agents_dir()
 	return vim.fs.joinpath(M.root(), "agents")
 end
 
-function M.skills_dir()
-	return vim.fs.joinpath(M.root(), "skills")
-end
-
 function M.cache_dir()
 	return vim.fs.joinpath(M.root(), "cache")
 end
@@ -43,26 +38,7 @@ local function mkdir(path)
 	vim.fn.mkdir(path, "p")
 end
 
-local SKILLS_README = [[
-# CSA skills
-
-Drop Cursor-compatible skills here. In the CSA Input panel, type `/` to
-complete a skill name. Only skills you mention with `/name` are injected into
-that turn's provider prompt (nothing is auto-injected).
-
-Layout (either form works):
-
-```text
-skills/
-  my-skill/
-    SKILL.md          # preferred (Cursor / agentskills.io)
-  other-skill.md      # flat markdown also accepted
-```
-
-`SKILL.md` may start with YAML frontmatter (`name`, `description`).
-]]
-
---- Ensure csa/{history,agents,skills,cache} and default agent markdown files exist.
+--- Ensure csa/{history,agents,cache} and default agent markdown files exist.
 function M.ensure()
 	if ensured then
 		return M.root()
@@ -70,7 +46,6 @@ function M.ensure()
 	mkdir(M.root())
 	mkdir(M.history_dir())
 	mkdir(M.agents_dir())
-	mkdir(M.skills_dir())
 	mkdir(M.cache_dir())
 	local agents = M.agents_dir()
 	for _, name in ipairs(AGENT_FILES) do
@@ -82,14 +57,6 @@ function M.ensure()
 				fd:write("")
 				fd:close()
 			end
-		end
-	end
-	local skills_readme = vim.fs.joinpath(M.skills_dir(), "README.md")
-	if vim.uv.fs_stat(skills_readme) == nil then
-		local fd = io.open(skills_readme, "w")
-		if fd then
-			fd:write(SKILLS_README)
-			fd:close()
 		end
 	end
 	ensured = true
@@ -196,184 +163,6 @@ function M.agent_context_prompt()
 	return vim.trim(table.concat(parts, "\n"))
 end
 
----@param content string
----@return string|nil name
----@return string body
----@return string|nil description
-local function parse_skill_markdown(content)
-	local block, remainder = content:match("^%-%-%-\r?\n(.-)\r?\n%-%-%-\r?\n(.*)$")
-	if not block then
-		return nil, content, nil
-	end
-	local name = block:match("name:%s*[\"']?([%w._%-]+)[\"']?")
-	local description = block:match("description:%s*[\"'](.-)[\"']")
-	if not description then
-		description = block:match("description:%s*(%S[^\n]*)")
-	end
-	if description then
-		description = vim.trim(description)
-		if description == "" then
-			description = nil
-		end
-	end
-	return name, remainder or content, description
-end
-
---- Installed skills under skills/ (folder/SKILL.md or flat *.md, excluding README.md).
----@return { name: string, path: string, content: string, description?: string }[]
-function M.list_skills()
-	M.ensure()
-	local dir = M.skills_dir()
-	---@type { name: string, path: string, content: string, description?: string }[]
-	local out = {}
-	local seen = {}
-
-	local function push(id, path)
-		if seen[id] or seen[path] then
-			return
-		end
-		local st = vim.uv.fs_stat(path)
-		if not st or st.type ~= "file" then
-			return
-		end
-		local raw = read_file_limited(path, SKILL_DOC_MAX_BYTES)
-		if type(raw) ~= "string" or vim.trim(raw) == "" then
-			return
-		end
-		local fm_name, body, description = parse_skill_markdown(raw)
-		local name = fm_name or id
-		if vim.trim(body) == "" then
-			return
-		end
-		seen[id] = true
-		seen[path] = true
-		out[#out + 1] = {
-			name = name,
-			path = path,
-			content = vim.trim(body),
-			description = description,
-		}
-	end
-
-	local handle = vim.uv.fs_scandir(dir)
-	if not handle then
-		return out
-	end
-	local flat = {}
-	local folders = {}
-	while true do
-		local name, typ = vim.uv.fs_scandir_next(handle)
-		if not name then
-			break
-		end
-		if name == "." or name == ".." or name == "README.md" then
-			goto continue
-		end
-		local path = vim.fs.joinpath(dir, name)
-		local st = vim.uv.fs_stat(path)
-		local kind = typ
-		if st then
-			kind = st.type
-		end
-		if kind == "file" and name:match("%.md$") then
-			flat[#flat + 1] = name
-		elseif kind == "directory" then
-			folders[#folders + 1] = name
-		end
-		::continue::
-	end
-	table.sort(folders)
-	table.sort(flat)
-	for _, name in ipairs(folders) do
-		local skill_md = vim.fs.joinpath(dir, name, "SKILL.md")
-		if vim.uv.fs_stat(skill_md) then
-			push(name, skill_md)
-		else
-			-- Allow skill.md lowercase.
-			local alt = vim.fs.joinpath(dir, name, "skill.md")
-			if vim.uv.fs_stat(alt) then
-				push(name, alt)
-			end
-		end
-	end
-	for _, name in ipairs(flat) do
-		push(name:gsub("%.md$", ""), vim.fs.joinpath(dir, name))
-	end
-	return out
-end
-
---- Skill names mentioned as `/name` in text (order preserved, deduped).
----@param text string|string[]|nil
----@return string[]
-function M.skill_mentions_in_text(text)
-	local blob
-	if type(text) == "table" then
-		blob = table.concat(text, "\n")
-	elseif type(text) == "string" then
-		blob = text
-	else
-		return {}
-	end
-	---@type string[]
-	local out = {}
-	local seen = {}
-	for name in blob:gmatch("/([%w._%-]+)") do
-		if not seen[name] then
-			seen[name] = true
-			out[#out + 1] = name
-		end
-	end
-	return out
-end
-
---- Build the skills block for a prompt. Only names listed in `names` are included.
---- Empty / nil `names` → no skills injected (mentions are opt-in via `/name` in Input).
----@param names string[]|nil
----@return string
-function M.skills_context_prompt(names)
-	if type(names) ~= "table" or #names == 0 then
-		return ""
-	end
-	local want = {}
-	for _, name in ipairs(names) do
-		if type(name) == "string" and name ~= "" then
-			want[name] = true
-		end
-	end
-	if vim.tbl_isempty(want) then
-		return ""
-	end
-	local skills = M.list_skills()
-	---@type { name: string, path: string, content: string, description?: string }[]
-	local picked = {}
-	for _, skill in ipairs(skills) do
-		if want[skill.name] then
-			picked[#picked + 1] = skill
-		end
-	end
-	if #picked == 0 then
-		return ""
-	end
-	local parts = {
-		"# CSA selected skills",
-		"",
-		"The user invoked the skills below with `/name` in Input.",
-		"Apply each skill's instructions for this request.",
-		"Treat them as authoritative workflow guidance for this turn.",
-		"",
-	}
-	for _, skill in ipairs(picked) do
-		parts[#parts + 1] = "## Skill: " .. skill.name
-		if type(skill.description) == "string" and skill.description ~= "" then
-			parts[#parts + 1] = ""
-			parts[#parts + 1] = "_" .. skill.description .. "_"
-		end
-		parts[#parts + 1] = ""
-		parts[#parts + 1] = skill.content
-		parts[#parts + 1] = ""
-	end
-	return vim.trim(table.concat(parts, "\n"))
-end
 --- Random 18-char alphanumeric hash.
 ---@return string
 function M.random_id()

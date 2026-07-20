@@ -13,7 +13,7 @@ local function ensure_init()
 	end
 	setup_done = true
 	highlights.setup()
-	pcall(require("csa.blink").ensure)
+	pcall(require("csa.review").setup_keymaps)
 end
 
 --- Configure CSA. Pass a table to set options; omit args to only ensure highlights.
